@@ -1616,6 +1616,15 @@ jdbc_deparse_relation(StringInfo buf, Relation rel, char *q_char)
 	else
 	{
 		/* schema.table */
+		appendStringInfo(buf, "%s.%s", jdbc_quote_identifier(nspname, q_char, false),
+						 jdbc_quote_identifier(relname, q_char, false));
+	}
+}
+
+/*
+ * Deparse string literal in remote SQL command.
+ */
+static void
 jdbc_deparse_string_literal(StringInfo buf, const char *val)
 {
 	const char *valptr;
