@@ -393,13 +393,21 @@ public class JDBCUtils {
 
   /*
    * getTableNames
-   *      Returns the column name
+   *      Returns the table names from the specified catalog and schema
    */
   public String[] getTableNames() throws SQLException {
+    return getTableNames(null, null);
+  }
+
+  /*
+   * getTableNames
+   *      Returns the table names from the specified catalog and schema
+   */
+  public String[] getTableNames(String catalog, String schema) throws SQLException {
     try {
       checkConnExist();
       DatabaseMetaData md = conn.getConnection().getMetaData();
-      ResultSet tmpResultSet = md.getTables(null, null, "%", null);
+      ResultSet tmpResultSet = md.getTables(catalog, schema, "%", null);
 
       List<String> tmpTableNamesList = new ArrayList<String>();
       while (tmpResultSet.next()) {
@@ -417,13 +425,21 @@ public class JDBCUtils {
 
   /*
    * getColumnNames
-   *      Returns the column name
+   *      Returns the column names for the specified table
    */
   public String[] getColumnNames(String tableName) throws SQLException {
+    return getColumnNames(null, null, tableName);
+  }
+
+  /*
+   * getColumnNames
+   *      Returns the column names for the specified table with catalog and schema
+   */
+  public String[] getColumnNames(String catalog, String schema, String tableName) throws SQLException {
     try {
       checkConnExist();
       DatabaseMetaData md = conn.getConnection().getMetaData();
-      ResultSet tmpResultSet = md.getColumns(null, null, tableName, null);
+      ResultSet tmpResultSet = md.getColumns(catalog, schema, tableName, null);
       List<String> tmpColumnNamesList = new ArrayList<String>();
       while (tmpResultSet.next()) {
         tmpColumnNamesList.add(tmpResultSet.getString("COLUMN_NAME"));
@@ -440,13 +456,21 @@ public class JDBCUtils {
 
   /*
    * getColumnTypes
-   *      Returns the column name
+   *      Returns the column types for the specified table
    */
   public String[] getColumnTypes(String tableName) throws SQLException {
+    return getColumnTypes(null, null, tableName);
+  }
+
+  /*
+   * getColumnTypes
+   *      Returns the column types for the specified table with catalog and schema
+   */
+  public String[] getColumnTypes(String catalog, String schema, String tableName) throws SQLException {
     try {
       checkConnExist();
       DatabaseMetaData md = conn.getConnection().getMetaData();
-      ResultSet tmpResultSet = md.getColumns(null, null, tableName, null);
+      ResultSet tmpResultSet = md.getColumns(catalog, schema, tableName, null);
       List<String> tmpColumnTypesList = new ArrayList<String>();
       while (tmpResultSet.next()) {
         tmpColumnTypesList.add(tmpResultSet.getString("TYPE_NAME"));
@@ -513,13 +537,21 @@ public class JDBCUtils {
 
   /*
    * getPrimaryKey
-   *      Returns the column name
+   *      Returns the primary key column names for the specified table
    */
   public String[] getPrimaryKey(String tableName) throws SQLException {
+    return getPrimaryKey(null, null, tableName);
+  }
+
+  /*
+   * getPrimaryKey
+   *      Returns the primary key column names for the specified table with catalog and schema
+   */
+  public String[] getPrimaryKey(String catalog, String schema, String tableName) throws SQLException {
     try {
       checkConnExist();
       DatabaseMetaData md = conn.getConnection().getMetaData();
-      ResultSet tmpResultSet = md.getPrimaryKeys(null, null, tableName);
+      ResultSet tmpResultSet = md.getPrimaryKeys(catalog, schema, tableName);
       List<String> tmpPrimaryKeyList = new ArrayList<String>();
       while (tmpResultSet.next()) {
         tmpPrimaryKeyList.add(tmpResultSet.getString("COLUMN_NAME"));

@@ -200,8 +200,20 @@ command:
 
 ## CREATE FOREIGN TABLE options
 
-`jdbc_fdw` accepts the no table-level options via the
-`CREATE FOREIGN TABLE` command.
+`jdbc_fdw` accepts the following table-level options via the
+`CREATE FOREIGN TABLE` command:
+
+- **catalog_name** as *string*
+
+  Override the catalog name to use when accessing the remote table. This allows mapping a PostgreSQL foreign table to a table in a specific catalog on the remote database.
+
+- **schema_name** as *string*
+
+  Override the schema name to use when accessing the remote table. This allows mapping a PostgreSQL foreign table to a table in a specific schema on the remote database.
+
+- **table_name** as *string*
+
+  Override the table name to use when accessing the remote table. This allows mapping a PostgreSQL foreign table to a different table name on the remote database.
 
 The following column-level options are available:
 
@@ -294,6 +306,18 @@ Create an appropriate user mapping:
 Create a foreign table referencing the JDBC table `fdw_test`:
 
 	CREATE FOREIGN TABLE [table name] (id int) SERVER [server name]);
+
+Create a foreign table with custom catalog, schema, and table mapping:
+
+	CREATE FOREIGN TABLE my_foreign_table (id int, name text) 
+	  SERVER my_jdbc_server
+	  OPTIONS (
+	    catalog_name 'production_catalog',
+	    schema_name 'sales',
+	    table_name 'customer_data'
+	  );
+
+This maps the PostgreSQL table `my_foreign_table` to the table `production_catalog.sales.customer_data` on the remote database.
 
 
 Query the foreign table.

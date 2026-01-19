@@ -1549,12 +1549,14 @@ jdbc_deparse_aggref(Aggref *node, deparse_expr_cxt *context)
 /*
  * Append remote name of specified foreign table to buf. Use value of
  * table_name FDW option (if any) instead of relation's name. Similarly,
- * schema_name FDW option overrides schema name.
+ * schema_name FDW option overrides schema name, and catalog_name FDW option
+ * overrides catalog name.
  */
 static void
 jdbc_deparse_relation(StringInfo buf, Relation rel, char *q_char)
 {
 	ForeignTable *table;
+	const char *catname = NULL;
 	const char *nspname = NULL;
 	const char *relname = NULL;
 	ListCell   *lc;
@@ -1569,7 +1571,9 @@ jdbc_deparse_relation(StringInfo buf, Relation rel, char *q_char)
 	{
 		DefElem    *def = (DefElem *) lfirst(lc);
 
-		if (strcmp(def->defname, "schema_name") == 0)
+		if (strcmp(def->defname, "catalog_name") == 0)
+			catname = defGetString(def);
+		else if (strcmp(def->defname, "schema_name") == 0)
 			nspname = defGetString(def);
 		else if (strcmp(def->defname, "table_name") == 0)
 			relname = defGetString(def);
@@ -1585,26 +1589,33 @@ jdbc_deparse_relation(StringInfo buf, Relation rel, char *q_char)
 		relname = RelationGetRelationName(rel);
 	}
 
-	if (nspname == NULL)
+	/* Build the qualified table name: [catalog.][[schema.]table] */
+	if (catname != NULL && strlen(catname) > 0)
 	{
-		appendStringInfo(buf, "%s", jdbc_quote_identifier(relname, q_char, false));
+		if (nspname == NULL || strlen(nspname) == 0)
+		{
+			/* catalog.table */
+			appendStringInfo(buf, "%s.%s", 
+						 jdbc_quote_identifier(catname, q_char, false),
+						 jdbc_quote_identifier(relname, q_char, false));
+		}
+		else
+		{
+			/* catalog.schema.table */
+			appendStringInfo(buf, "%s.%s.%s", 
+						 jdbc_quote_identifier(catname, q_char, false),
+						 jdbc_quote_identifier(nspname, q_char, false),
+						 jdbc_quote_identifier(relname, q_char, false));
+		}
 	}
-	else if (strlen(nspname) == 0)
+	else if (nspname == NULL || strlen(nspname) == 0)
 	{
+		/* table only */
 		appendStringInfo(buf, "%s", jdbc_quote_identifier(relname, q_char, false));
 	}
 	else
 	{
-		appendStringInfo(buf, "%s.%s", jdbc_quote_identifier(nspname, q_char, false),
-						 jdbc_quote_identifier(relname, q_char, false));
-	}
-
-}
-
-/*
- * Append a SQL string literal representing "val" to buf.
- */
-static void
+		/* schema.table */
 jdbc_deparse_string_literal(StringInfo buf, const char *val)
 {
 	const char *valptr;
