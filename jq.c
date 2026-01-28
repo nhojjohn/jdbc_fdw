@@ -9,6 +9,7 @@
  * ---------------------------------------------
  */
 #include <stdlib.h>
+#include <stdint.h>
 #include "postgres.h"
 #include "jdbc_fdw.h"
 #include "catalog/pg_foreign_server.h"
@@ -185,12 +186,14 @@ jq_cancel(JDBCUtilsInfo * jdbcUtilsInfo)
 /*
  * jdbc_convert_string_to_cstring Uses a String object passed as a jobject to
  * the function to create an instance of C String.
+ * 
+ * This function properly converts Java String (UTF-16) to C string (UTF-8)
+ * avoiding the Modified UTF-8 issues with surrogate pairs from GetStringUTFChars.
  */
 static char *
 jdbc_convert_string_to_cstring(jobject java_cstring)
 {
 	jclass		JavaString;
-	char	   *StringPointer;
 	char	   *cString = NULL;
 
 	JavaString = (*Jenv)->FindClass(Jenv, "java/lang/String");
@@ -201,16 +204,115 @@ jdbc_convert_string_to_cstring(jobject java_cstring)
 
 	if (java_cstring != NULL)
 	{
-		StringPointer = (char *) (*Jenv)->GetStringUTFChars(Jenv,
-															(jstring) java_cstring, 0);
-		cString = pstrdup(StringPointer);
-		(*Jenv)->ReleaseStringUTFChars(Jenv, (jstring) java_cstring, StringPointer);
+		jstring jstr = (jstring) java_cstring;
+		jsize len = (*Jenv)->GetStringLength(Jenv, jstr);
+		
+		if (len > 0)
+		{
+			const jchar *utf16_chars = (*Jenv)->GetStringChars(Jenv, jstr, NULL);
+			if (utf16_chars != NULL)
+			{
+				/* 
+				 * Estimate UTF-8 buffer size (worst case: 4 bytes per UTF-16 code unit)
+				 * Plus 1 for null terminator
+				 */
+				size_t max_utf8_len = len * 4 + 1;
+				char *utf8_buffer = (char *) palloc(max_utf8_len);
+				size_t utf8_pos = 0;
+				
+				/* Convert UTF-16 to UTF-8 manually */
+				for (jsize i = 0; i < len; i++)
+				{
+					uint32_t codepoint;
+					jchar c1 = utf16_chars[i];
+					
+					/* Handle surrogate pairs */
+					if (c1 >= 0xD800 && c1 <= 0xDBFF && (i + 1) < len)
+					{
+						/* High surrogate */
+						jchar c2 = utf16_chars[i + 1];
+						if (c2 >= 0xDC00 && c2 <= 0xDFFF)
+						{
+							/* Low surrogate - construct the full codepoint */
+							codepoint = 0x10000 + (((c1 & 0x3FF) << 10) | (c2 & 0x3FF));
+							i++; /* Skip the low surrogate in the next iteration */
+						}
+						else
+						{
+							/* Invalid surrogate pair - use replacement character */
+							codepoint = 0xFFFD;
+						}
+					}
+					else if (c1 >= 0xDC00 && c1 <= 0xDFFF)
+					{
+						/* Unpaired low surrogate - use replacement character */
+						codepoint = 0xFFFD;
+					}
+					else
+					{
+						/* Regular UTF-16 character */
+						codepoint = c1;
+					}
+					
+					/* Convert codepoint to UTF-8 */
+					if (codepoint <= 0x7F)
+					{
+						/* 1-byte UTF-8 */
+						utf8_buffer[utf8_pos++] = (char) codepoint;
+					}
+					else if (codepoint <= 0x7FF)
+					{
+						/* 2-byte UTF-8 */
+						utf8_buffer[utf8_pos++] = (char) (0xC0 | (codepoint >> 6));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | (codepoint & 0x3F));
+					}
+					else if (codepoint <= 0xFFFF)
+					{
+						/* 3-byte UTF-8 */
+						utf8_buffer[utf8_pos++] = (char) (0xE0 | (codepoint >> 12));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | ((codepoint >> 6) & 0x3F));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | (codepoint & 0x3F));
+					}
+					else if (codepoint <= 0x10FFFF)
+					{
+						/* 4-byte UTF-8 */
+						utf8_buffer[utf8_pos++] = (char) (0xF0 | (codepoint >> 18));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | ((codepoint >> 12) & 0x3F));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | ((codepoint >> 6) & 0x3F));
+						utf8_buffer[utf8_pos++] = (char) (0x80 | (codepoint & 0x3F));
+					}
+					else
+					{
+						/* Invalid codepoint - use replacement character (0xFFFD) */
+						utf8_buffer[utf8_pos++] = (char) 0xEF;
+						utf8_buffer[utf8_pos++] = (char) 0xBF;
+						utf8_buffer[utf8_pos++] = (char) 0xBD;
+					}
+				}
+				
+				/* Null terminate */
+				utf8_buffer[utf8_pos] = '\0';
+				
+				/* Create PostgreSQL string and clean up */
+				cString = pstrdup(utf8_buffer);
+				pfree(utf8_buffer);
+				
+				(*Jenv)->ReleaseStringChars(Jenv, jstr, utf16_chars);
+			}
+			else
+			{
+				elog(ERROR, "Failed to get string characters from Java string");
+			}
+		}
+		else
+		{
+			/* Empty string */
+			cString = pstrdup("");
+		}
+		
 		(*Jenv)->DeleteLocalRef(Jenv, java_cstring);
 	}
-	else
-	{
-		StringPointer = NULL;
-	}
+	
 	return (cString);
 }
 

@@ -231,8 +231,20 @@ public class JDBCUtils {
               }
               break;
             default:
-              /* Convert all columns to String */
-              tmpArrayOfResultRow[i] = tmpResultSet.getString(i + 1);
+              /* Convert all columns to String and sanitize UTF-8 */
+              String rawValue = tmpResultSet.getString(i + 1);
+              if (rawValue != null) {
+                /* Ensure proper UTF-8 by converting through UTF-8 bytes */
+                try {
+                  byte[] utf8Bytes = rawValue.getBytes("UTF-8");
+                  tmpArrayOfResultRow[i] = new String(utf8Bytes, "UTF-8");
+                } catch (java.io.UnsupportedEncodingException e) {
+                  /* Should never happen, but fallback to original */
+                  tmpArrayOfResultRow[i] = rawValue;
+                }
+              } else {
+                tmpArrayOfResultRow[i] = null;
+              }
           }
         }
         /* The current row in resultSet is returned
