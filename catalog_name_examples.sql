@@ -49,6 +49,34 @@ OPTIONS (
 );
 -- This maps to: inventory.products (no catalog specified)
 
+-- 5. IMPORT FOREIGN SCHEMA with catalog_name option (NEW FEATURE)
+-- This imports all tables from a specific catalog and schema
+IMPORT FOREIGN SCHEMA "sales_data" 
+FROM SERVER my_jdbc_server 
+INTO imported_sales 
+OPTIONS (
+    catalog_name 'production_catalog'
+);
+
+-- 6. IMPORT FOREIGN SCHEMA with catalog_name and recreate option
+IMPORT FOREIGN SCHEMA "analytics" 
+FROM SERVER my_jdbc_server 
+INTO analytics_local 
+OPTIONS (
+    catalog_name 'data_warehouse',
+    recreate 'true'
+);
+
+-- The above IMPORT statements will generate CREATE FOREIGN TABLE commands like:
+-- CREATE FOREIGN TABLE imported_sales.table1(
+--     id INTEGER,
+--     name TEXT
+-- ) SERVER my_jdbc_server 
+-- OPTIONS (
+--     catalog_name 'production_catalog',
+--     schema_name 'sales_data'
+-- );
+
 -- 5. Using only table_name (existing functionality)
 CREATE FOREIGN TABLE table_only (
     id INTEGER,

@@ -128,6 +128,8 @@ void		jq_get_exception(void);
  */
 static List *jq_get_column_infos(JDBCUtilsInfo * jdbcUtilsInfo, char *tablename);
 static List *jq_get_table_names(JDBCUtilsInfo * jdbcUtilsInfo);
+static List *jq_get_column_infos_with_catalog(JDBCUtilsInfo * jdbcUtilsInfo, char *catalog_name, char *schema_name, char *tablename);
+static List *jq_get_table_names_with_catalog(JDBCUtilsInfo * jdbcUtilsInfo, char *catalog_name, char *schema_name);
 
 
 static void jq_get_JDBCUtils(JDBCUtilsInfo * jdbcUtilsInfo, jclass * JDBCUtilsClass, jobject * JDBCUtilsObject);
@@ -1890,8 +1892,266 @@ jq_get_table_names(JDBCUtilsInfo * jdbcUtilsInfo)
 	}
 	return tableName;
 }
+/*
+ * jq_get_table_names_with_catalog
+ */
+static List *
+jq_get_table_names_with_catalog(JDBCUtilsInfo * jdbcUtilsInfo, char *catalog_name, char *schema_name)
+{
+	jobject		JDBCUtilsObject;
+	jclass		JDBCUtilsClass;
+	jmethodID	idGetTableNames;
+	jobjectArray tableNameArray;
+	List	   *tableName = NIL;
+	jsize		numberOfTables;
+	int			i;
+	jstring		catalogStr = NULL;
+	jstring		schemaStr = NULL;
+
+	jq_get_JDBCUtils(jdbcUtilsInfo, &JDBCUtilsClass, &JDBCUtilsObject);
+
+	/* Convert C strings to Java strings */
+	if (catalog_name != NULL)
+		catalogStr = (*Jenv)->NewStringUTF(Jenv, catalog_name);
+	if (schema_name != NULL)
+		schemaStr = (*Jenv)->NewStringUTF(Jenv, schema_name);
+
+	idGetTableNames = (*Jenv)->GetMethodID(Jenv, JDBCUtilsClass, "getTableNames", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");
+	if (idGetTableNames == NULL)
+	{
+		ereport(ERROR, (errmsg("Failed to find the JDBCUtils.getTableNames(String, String) method")));
+	}
+	jq_exception_clear();
+	tableNameArray = (*Jenv)->CallObjectMethod(Jenv, JDBCUtilsObject, idGetTableNames, catalogStr, schemaStr);
+	jq_get_exception();
+	if (tableNameArray != NULL)
+	{
+		numberOfTables = (*Jenv)->GetArrayLength(Jenv, tableNameArray);
+		for (i = 0; i < numberOfTables; i++)
+		{
+			char	   *tmpTableName = jdbc_convert_string_to_cstring((jobject) (*Jenv)->GetObjectArrayElement(Jenv, tableNameArray, i));
+
+			tableName = lappend(tableName, tmpTableName);
+		}
+		(*Jenv)->DeleteLocalRef(Jenv, tableNameArray);
+	}
+
+	/* Clean up local references */
+	if (catalogStr != NULL)
+		(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+	if (schemaStr != NULL)
+		(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+
+	return tableName;
+}
 
 /*
+ * jq_get_column_infos_with_catalog
+ */
+static List *
+jq_get_column_infos_with_catalog(JDBCUtilsInfo * jdbcUtilsInfo, char *catalog_name, char *schema_name, char *tablename)
+{
+	jobject		JDBCUtilsObject;
+	jclass		JDBCUtilsClass;
+	jstring		catalogStr = NULL;
+	jstring		schemaStr = NULL;
+	jstring		jtablename;
+	int			i;
+
+	/* getColumnNames */
+	jmethodID	idGetColumnNames;
+	jobjectArray columnNamesArray;
+	jsize		numberOfNames;
+
+	/* getColumnTypes */
+	jmethodID	idGetColumnTypes;
+	jobjectArray columnTypesArray;
+	jsize		numberOfTypes;
+
+	/* getPrimaryKey */
+	jmethodID	idGetPrimaryKey;
+	jobjectArray primaryKeyArray;
+	jsize		numberOfKeys;
+	List	   *primaryKey = NIL;
+
+	/* for generating columnInfo List */
+	List	   *columnInfoList = NIL;
+	JcolumnInfo *columnInfo;
+	ListCell   *lc;
+
+	/* Convert C strings to Java strings */
+	if (catalog_name != NULL)
+		catalogStr = (*Jenv)->NewStringUTF(Jenv, catalog_name);
+	if (schema_name != NULL)
+		schemaStr = (*Jenv)->NewStringUTF(Jenv, schema_name);
+	jtablename = (*Jenv)->NewStringUTF(Jenv, tablename);
+
+	/* Get JDBCUtils */
+	PG_TRY();
+	{
+		jq_get_JDBCUtils(jdbcUtilsInfo, &JDBCUtilsClass, &JDBCUtilsObject);
+	}
+	PG_CATCH();
+	{
+		if (catalogStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+		if (schemaStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+		(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	/* getColumnNames */
+	idGetColumnNames = (*Jenv)->GetMethodID(Jenv, JDBCUtilsClass, "getColumnNames", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");
+	if (idGetColumnNames == NULL)
+	{
+		if (catalogStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+		if (schemaStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+		(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+		ereport(ERROR, (errmsg("Failed to find the JDBCUtils.getColumnNames(String, String, String) method")));
+	}
+	jq_exception_clear();
+	columnNamesArray = (*Jenv)->CallObjectMethod(Jenv, JDBCUtilsObject, idGetColumnNames, catalogStr, schemaStr, jtablename);
+	jq_get_exception();
+
+	/* getColumnTypes */
+	idGetColumnTypes = (*Jenv)->GetMethodID(Jenv, JDBCUtilsClass, "getColumnTypes", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");
+	if (idGetColumnTypes == NULL)
+	{
+		if (catalogStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+		if (schemaStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+		(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+		if (columnNamesArray != NULL)
+		{
+			(*Jenv)->DeleteLocalRef(Jenv, columnNamesArray);
+		}
+		ereport(ERROR, (errmsg("Failed to find the JDBCUtils.getColumnTypes(String, String, String) method")));
+	}
+	jq_exception_clear();
+	columnTypesArray = (*Jenv)->CallObjectMethod(Jenv, JDBCUtilsObject, idGetColumnTypes, catalogStr, schemaStr, jtablename);
+	jq_get_exception();
+
+	/* getPrimaryKey */
+	idGetPrimaryKey = (*Jenv)->GetMethodID(Jenv, JDBCUtilsClass, "getPrimaryKey", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");
+	if (idGetPrimaryKey == NULL)
+	{
+		if (catalogStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+		if (schemaStr != NULL)
+			(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+		(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+		if (columnNamesArray != NULL)
+		{
+			(*Jenv)->DeleteLocalRef(Jenv, columnNamesArray);
+		}
+		if (columnTypesArray != NULL)
+		{
+			(*Jenv)->DeleteLocalRef(Jenv, columnTypesArray);
+		}
+		ereport(ERROR, (errmsg("Failed to find the JDBCUtils.getPrimaryKey(String, String, String) method")));
+	}
+	jq_exception_clear();
+	primaryKeyArray = (*Jenv)->CallObjectMethod(Jenv, JDBCUtilsObject, idGetPrimaryKey, catalogStr, schemaStr, jtablename);
+	jq_get_exception();
+	if (primaryKeyArray != NULL)
+	{
+		numberOfKeys = (*Jenv)->GetArrayLength(Jenv, primaryKeyArray);
+		for (i = 0; i < numberOfKeys; i++)
+		{
+			char	   *tmpPrimaryKey = jdbc_convert_string_to_cstring((jobject) (*Jenv)->GetObjectArrayElement(Jenv, primaryKeyArray, i));
+
+			primaryKey = lappend(primaryKey, tmpPrimaryKey);
+		}
+		(*Jenv)->DeleteLocalRef(Jenv, primaryKeyArray);
+	}
+
+	if (columnNamesArray != NULL && columnTypesArray != NULL)
+	{
+		numberOfNames = (*Jenv)->GetArrayLength(Jenv, columnNamesArray);
+		numberOfTypes = (*Jenv)->GetArrayLength(Jenv, columnTypesArray);
+
+		if (numberOfNames != numberOfTypes)
+		{
+			if (catalogStr != NULL)
+				(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+			if (schemaStr != NULL)
+				(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+			(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+			(*Jenv)->DeleteLocalRef(Jenv, columnTypesArray);
+			(*Jenv)->DeleteLocalRef(Jenv, columnNamesArray);
+			ereport(ERROR, (errmsg("Cannot get the dependable columnInfo.")));
+		}
+
+		for (i = 0; i < numberOfNames; i++)
+		{
+			/* init columnInfo */
+			char	   *tmpColumnNames = jdbc_convert_string_to_cstring((jobject) (*Jenv)->GetObjectArrayElement(Jenv, columnNamesArray, i));
+			char	   *tmpColumnTypes = jdbc_convert_string_to_cstring((jobject) (*Jenv)->GetObjectArrayElement(Jenv, columnTypesArray, i));
+
+			columnInfo = (JcolumnInfo *) palloc0(sizeof(JcolumnInfo));
+			columnInfo->column_name = tmpColumnNames;
+			columnInfo->column_type = tmpColumnTypes;
+			columnInfo->primary_key = false;
+			/* check the column is primary key or not */
+			foreach(lc, primaryKey)
+			{
+				char	   *tmpPrimaryKey = NULL;
+
+				tmpPrimaryKey = (char *) lfirst(lc);
+				if (!strcmp(tmpPrimaryKey, tmpColumnNames))
+				{
+					columnInfo->primary_key = true;
+				}
+			}
+			columnInfoList = lappend(columnInfoList, columnInfo);
+		}
+		(*Jenv)->DeleteLocalRef(Jenv, columnTypesArray);
+		(*Jenv)->DeleteLocalRef(Jenv, columnNamesArray);
+	}
+
+	/* Clean up local references */
+	if (catalogStr != NULL)
+		(*Jenv)->DeleteLocalRef(Jenv, catalogStr);
+	if (schemaStr != NULL)
+		(*Jenv)->DeleteLocalRef(Jenv, schemaStr);
+	(*Jenv)->DeleteLocalRef(Jenv, jtablename);
+
+	return columnInfoList;
+}
+
+/*
+ * jq_get_schema_info_with_catalog
+ */
+List *
+jq_get_schema_info_with_catalog(JDBCUtilsInfo * jdbcUtilsInfo, char *catalog_name, char *schema_name)
+{
+	List	   *schema_list = NIL;
+	List	   *tableName = NIL;
+	JtableInfo *tableInfo;
+	ListCell   *lc;
+
+	tableName = jq_get_table_names_with_catalog(jdbcUtilsInfo, catalog_name, schema_name);
+
+	foreach(lc, tableName)
+	{
+		char	   *tmpTableName = NULL;
+
+		tmpTableName = (char *) lfirst(lc);
+		tableInfo = (JtableInfo *) palloc0(sizeof(JtableInfo));
+		if (tmpTableName != NULL)
+		{
+			tableInfo->table_name = tmpTableName;
+			tableInfo->column_info = jq_get_column_infos_with_catalog(jdbcUtilsInfo, catalog_name, schema_name, tmpTableName);
+			schema_list = lappend(schema_list, tableInfo);
+		}
+	}
+	return schema_list;
+}/*
  * jq_get_schema_info
  */
 List *

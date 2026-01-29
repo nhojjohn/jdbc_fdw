@@ -3093,6 +3093,7 @@ jdbcImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	List	   *commands = NIL;
 	List	   *commands_drop = NIL;
 	bool		recreate = false;
+	char	   *catalog_name = NULL;
 	ForeignServer *server;
 	UserMapping *user;
 	JDBCUtilsInfo *jdbcUtilsInfo;
@@ -3113,6 +3114,8 @@ jdbcImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 		if (strcmp(def->defname, "recreate") == 0)
 			recreate = defGetBoolean(def);
+		else if (strcmp(def->defname, "catalog_name") == 0)
+			catalog_name = defGetString(def);
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
@@ -3123,7 +3126,7 @@ jdbcImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	user = GetUserMapping(GetUserId(), server->serverid);
 	jdbcUtilsInfo = jdbc_get_jdbc_utils_obj(server, user, false);
 
-	schema_list = jq_get_schema_info(jdbcUtilsInfo);
+	schema_list = jq_get_schema_info_with_catalog(jdbcUtilsInfo, catalog_name, stmt->remote_schema);
 	if (schema_list != NIL)
 	{
 		initStringInfo(&buf);
@@ -3171,7 +3174,31 @@ jdbcImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				if (columnInfo->primary_key)
 					appendStringInfoString(&buf, " OPTIONS (key 'true')");
 			}
-			appendStringInfo(&buf, ") SERVER %s;", quote_identifier(server->servername));
+			appendStringInfo(&buf, ") SERVER %s", quote_identifier(server->servername));
+
+			/* Add OPTIONS clause if catalog_name or schema is specified */
+			if (catalog_name != NULL || stmt->remote_schema != NULL)
+			{
+				bool first_option = true;
+				appendStringInfoString(&buf, " OPTIONS (");
+				
+				if (catalog_name != NULL)
+				{
+					appendStringInfo(&buf, "catalog_name '%s'", catalog_name);
+					first_option = false;
+				}
+				
+				if (stmt->remote_schema != NULL)
+				{
+					if (!first_option)
+						appendStringInfoString(&buf, ", ");
+					appendStringInfo(&buf, "schema_name '%s'", stmt->remote_schema);
+				}
+				
+				appendStringInfoString(&buf, ")");
+			}
+			
+			appendStringInfoString(&buf, ";");
 			commands = lappend(commands, pstrdup(buf.data));
 	NEXT_COLUMN:
 			resetStringInfo(&buf);
