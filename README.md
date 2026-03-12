@@ -76,6 +76,8 @@ This is a performance feature.
 List of aggregate functions push-down:
 ```
 sum, avg, stddev, stddev_pop, stddev_samp, var_pop, var_samp, variance, max, min, count.
+
+DISTINCT inside aggregate functions (e.g., COUNT(DISTINCT col)) is also supported.
 ```
 ### Notes about features
 
