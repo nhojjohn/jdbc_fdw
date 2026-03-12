@@ -769,13 +769,16 @@ jdbc_foreign_expr_walker(Node *node,
 					return false;
 
 				/*
-				 * Does not push down DISTINCT inside aggregate function
-				 * because of undefined behavior of the GridDB JDBC driver.
-				 * TODO: We may hanlde DISTINCT in future with new release
-				 * of GridDB JDBC driver.
+				 * DISTINCT inside aggregate function is now allowed to be
+				 * pushed down. The DISTINCT keyword is standard SQL and
+				 * supported by most JDBC-accessible databases. The deparsing
+				 * logic in jdbc_deparse_aggref already handles emitting the
+				 * DISTINCT keyword correctly.
+				 *
+				 * Note: If using a JDBC driver that does not support DISTINCT
+				 * inside aggregates (e.g., older GridDB JDBC drivers), this
+				 * may need to be restricted via a server-level FDW option.
 				 */
-				if (agg->aggdistinct != NIL)
-					return false;
 
 				/*
 				 * Recurse to input args. aggdirectargs, aggorder and
