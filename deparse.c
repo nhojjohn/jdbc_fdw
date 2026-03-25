@@ -811,6 +811,8 @@ jdbc_foreign_expr_walker(Node *node,
 				 */
 				if (agg->inputcollid == InvalidOid)
 					 /* OK, inputs are all noncollatable */ ;
+				else if (agg->inputcollid == DEFAULT_COLLATION_OID)
+					 /* OK, default collation is safe for all databases */ ;
 				else if (inner_cxt.state != FDW_COLLATE_SAFE ||
 						 agg->inputcollid != inner_cxt.collation)
 					return false;
